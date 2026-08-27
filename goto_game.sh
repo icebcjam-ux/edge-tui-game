@@ -45,6 +45,9 @@ spawn_tiled() {
 
     tmux select-layout -t game_cluster tiled
     tmux attach-session -t game_cluster
+
+    # 關鍵修正：加 TMUX= 強制無視外層嵌套
+    TMUX= tmux attach-session -t game_cluster
 }
 
 # 判斷是否直接傳入參數（例如 ./goto_game.sh zero2w）
