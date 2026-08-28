@@ -3,9 +3,9 @@
 # 定義遠端裝置資訊
 # 格式: "地名|IP|遠端帳號|遠端GAME路徑|本地掛載點"
 MOUNTS=(
-    "Lcd|192.168.1.121|lcd|/home/lcd/GAME|/home/red/MultiNode-DevHub/mounts_game/lcd"
-    "Zero 2w|192.168.1.104|zero2w|/home/zero2w/GAME|/home/red/MultiNode-DevHub/mounts_game/zero2"
-    "White|192.168.1.116|white|/home/white/GAME|/home/red/MultiNode-DevHub/mounts_game/white"
+    "Lcd|192.168.1.121|lcd|/home/lcd/GAME|/home/red/MultiNode-DevHub/mounts_game/lcdGAME"
+    "Zero 2w|192.168.1.104|zero2w|/home/zero2w/GAME|/home/red/MultiNode-DevHub/mounts_game/zero2wGAME"
+    "White|192.168.1.116|white|/home/white/GAME|/home/red/MultiNode-DevHub/mounts_game/whiteGAME"
 )
 
 # 1. 處理本地端 Red 的 GAME 目錄
