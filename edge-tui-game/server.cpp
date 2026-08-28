@@ -22,29 +22,25 @@
 #define GREEN   "\033[32m"
 #define YELLOW  "\033[33m"
 #define BLUE    "\033[34m"
+#define CYAN    "\033[36m"
 
-// --- 全域變數（解決 Scope 區域問題）---
-auto g_start_time = std::chrono::steady_clock::now();
-std::string g_start_time_str = "";
+// 全域整體啟動時間
+auto g_server_start_time = std::chrono::steady_clock::now();
 
-// 取得當前系統時間字串 (HH:MM:SS)
-std::string get_start_time_str() {
-    auto now = std::chrono::system_clock::now();
-    std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-    struct tm* timeinfo = localtime(&now_time);
-    char buffer[16];
-    strftime(buffer, sizeof(buffer), "%H:%M:%S", timeinfo);
-    return std::string(buffer);
-}
+// 節點個別統計資料結構
+struct NodeStats {
+    uint32_t laps = 0;              // 跑了幾圈
+    uint32_t total_packets = 0;     // 累積收包數（計算跑多久與活躍度）
+    float current_speed = 0.0f;     // 即時速度 (x/sec)
+    std::chrono::steady_clock::time_point first_seen; // 首次上線時間
+    std::chrono::steady_clock::time_point last_seen;  // 上次收到封包時間
+    bool active = false;
+};
+
+NodeStats node_stats[4];
 
 void draw_tui(const GameFrame& frame) {
-    // 1. 計算總運行時間 (秒)
     auto current_time = std::chrono::steady_clock::now();
-    auto elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(current_time - g_start_time).count();
-
-    int hours = elapsed_sec / 3600;
-    int minutes = (elapsed_sec % 3600) / 60;
-    int seconds = elapsed_sec % 60;
 
     // 游標位移至 Terminal 左上角
     std::cout << "\033[H";
@@ -85,21 +81,47 @@ void draw_tui(const GameFrame& frame) {
         std::cout << "\n";
     }
 
-    // 顯示全場數據面板
+    // 顯示全場數據面板與各節點個別數據
     std::cout << "------------------------------------------------------------\n";
     std::cout << "Frame Seq: " << frame.frame_seq << "\n";
-    std::cout << BLUE   << "[0] Pi 5    (P) " << RESET << "X: " << (int)frame.vehicles[0].pos_x << " Y: " << (int)frame.vehicles[0].pos_y << "\n";
-    std::cout << GREEN  << "[1] Pi 3B   (A) " << RESET << "X: " << (int)frame.vehicles[1].pos_x << " Y: " << (int)frame.vehicles[1].pos_y << "\n";
-    std::cout << YELLOW << "[2] Pi 3B+  (B) " << RESET << "X: " << (int)frame.vehicles[2].pos_x << " Y: " << (int)frame.vehicles[2].pos_y << "\n";
-    std::cout << RED    << "[3] Zero 2W (Z) " << RESET << "X: " << (int)frame.vehicles[3].pos_x << " Y: " << (int)frame.vehicles[3].pos_y << "\n";
 
-    // 2. 格式化輸出到框選區域
-    std::cout << "\033[36mStart Time :\033[0m " << g_start_time_str << "\n";
-    std::cout << "\033[36mUptime     :\033[0m "
-              << std::setfill('0') << std::setw(2) << hours << ":"
-              << std::setfill('0') << std::setw(2) << minutes << ":"
-              << std::setfill('0') << std::setw(2) << seconds << "\n";
-    std::cout << "\033[36mLoop Count :\033[0m " << frame.frame_seq << " loops\n";
+    const char* node_names[4] = {"[0] Pi 5    (P)", "[1] Pi 3B   (A)", "[2] Pi 3B+  (B)", "[3] Zero 2W (Z)"};
+    const char* colors[4]     = {BLUE, GREEN, YELLOW, RED};
+
+    for (int i = 0; i < 4; ++i) {
+        // 計算該節點運行時間 (Node Uptime)
+        long node_uptime_sec = 0;
+        if (node_stats[i].active) {
+            node_uptime_sec = std::chrono::duration_cast<std::chrono::seconds>(current_time - node_stats[i].first_seen).count();
+        }
+
+        int n_h = node_uptime_sec / 3600;
+        int n_m = (node_uptime_sec % 3600) / 60;
+        int n_s = node_uptime_sec % 60;
+
+        std::cout << colors[i] << node_names[i] << RESET
+                  << " X: " << std::setw(2) << (int)frame.vehicles[i].pos_x
+                  << " | " << CYAN << "Laps: " << RESET << std::setw(3) << node_stats[i].laps
+                  << " | " << CYAN << "Spd: " << RESET << std::fixed << std::setprecision(1) << std::setw(4) << node_stats[i].current_speed << " step/s"
+                  << " | " << CYAN << "Node Time: " << RESET
+                  << std::setfill('0') << std::setw(2) << n_h << ":"
+                  << std::setfill('0') << std::setw(2) << n_m << ":"
+                  << std::setfill('0') << std::setw(2) << n_s << std::setfill(' ')
+                  << "\n";
+    }
+
+    // 整體系統統計資訊
+    auto total_elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(current_time - g_server_start_time).count();
+    int g_h = total_elapsed_sec / 3600;
+    int g_m = (total_elapsed_sec % 3600) / 60;
+    int g_s = total_elapsed_sec % 60;
+
+    std::cout << "------------------------------------------------------------\n";
+    std::cout << CYAN << "Total Uptime : " << RESET 
+              << std::setfill('0') << std::setw(2) << g_h << ":"
+              << std::setfill('0') << std::setw(2) << g_m << ":"
+              << std::setfill('0') << std::setw(2) << g_s << std::setfill(' ')
+              << " | " << CYAN << "Total Frame Loops: " << RESET << frame.frame_seq << "\n";
 }
 
 int main() {
@@ -119,7 +141,6 @@ int main() {
     GameFrame frame{};
     frame.frame_seq = 0;
 
-    // 給予初始位置
     for (int i = 0; i < 4; ++i) {
         frame.vehicles[i].pos_x = 1.0f;
         frame.vehicles[i].pos_y = i * 4 + 3;
@@ -128,14 +149,12 @@ int main() {
     socklen_t addr_len = sizeof(client_addr);
     VehicleInput input_pkt;
 
-    // 初始化啟動時間點與時間字串
-    g_start_time = std::chrono::steady_clock::now();
-    g_start_time_str = get_start_time_str();
+    g_server_start_time = std::chrono::steady_clock::now();
 
     while (true) {
         auto fps_start_time = std::chrono::high_resolution_clock::now();
 
-        // 滿空嘗試接收所有堆積的 UDP 封包
+        // 收取 UDP 封包並更新數據
         while (true) {
             ssize_t bytes = recvfrom(sockfd, &input_pkt, sizeof(input_pkt), MSG_DONTWAIT,
                                      (struct sockaddr*)&client_addr, &addr_len);
@@ -143,10 +162,26 @@ int main() {
 
             uint8_t id = input_pkt.vehicle_id;
             if (id < 4) {
-                frame.vehicles[id].pos_x += input_pkt.throttle * 0.5f;
+                auto now = std::chrono::steady_clock::now();
 
+                // 首次上線記錄
+                if (!node_stats[id].active) {
+                    node_stats[id].active = true;
+                    node_stats[id].first_seen = now;
+                }
+                node_stats[id].last_seen = now;
+                node_stats[id].total_packets++;
+
+                // 計算移動與圈數 (Lap Count)
+                float move_step = input_pkt.throttle * 0.5f;
+                node_stats[id].current_speed = move_step * 60.0f; // 估算每秒移動距離
+
+                frame.vehicles[id].pos_x += move_step;
+
+                // 觸發衝線過關 -> 圈數 +1
                 if (frame.vehicles[id].pos_x >= (float)(MAP_WIDTH - 2)) {
                     frame.vehicles[id].pos_x = 1.0f;
+                    node_stats[id].laps++;
                 }
             }
         }
@@ -154,7 +189,7 @@ int main() {
         frame.frame_seq++;
         draw_tui(frame);
 
-        // 60 FPS 渲染控制
+        // 60 FPS 幀率控制
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float, std::milli> elapsed = end_time - fps_start_time;
         if (elapsed.count() < 16.6f) {
