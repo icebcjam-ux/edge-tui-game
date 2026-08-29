@@ -4,6 +4,8 @@
 # 例如：
 #   ./game_push.sh bot_agent             (直接推送編譯好的 binary)
 #   ./game_push.sh bot_agent.cpp protocol.h (推送指定的多個原始碼檔案)
+#   要進入 edge-tui-game 資料夾後再執行此腳本，確保檔案路徑要進入
+#   指令式../game_push.sh bot_agent
 
 # 1. 檢查是否帶入必要參數
 if [ $# -eq 0 ]; then

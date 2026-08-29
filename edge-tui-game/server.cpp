@@ -15,6 +15,7 @@
 #define PORT 8888
 #define MAP_WIDTH 60
 #define MAP_HEIGHT 20
+#define NODE_COUNT 5  // 擴充至 5 個節點
 
 // ANSI 顏色控制碼
 #define RESET   "\033[0m"
@@ -22,31 +23,28 @@
 #define GREEN   "\033[32m"
 #define YELLOW  "\033[33m"
 #define BLUE    "\033[34m"
+#define MAGENTA "\033[35m"
 #define CYAN    "\033[36m"
 
-// 全域整體啟動時間
 auto g_server_start_time = std::chrono::steady_clock::now();
 
-// 節點個別統計資料結構
 struct NodeStats {
-    uint32_t laps = 0;              // 跑了幾圈
-    uint32_t total_packets = 0;     // 累積收包數（計算跑多久與活躍度）
-    float current_speed = 0.0f;     // 即時速度 (x/sec)
-    std::chrono::steady_clock::time_point first_seen; // 首次上線時間
-    std::chrono::steady_clock::time_point last_seen;  // 上次收到封包時間
+    uint32_t laps = 0;
+    uint32_t total_packets = 0;
+    float current_speed = 0.0f;
+    std::chrono::steady_clock::time_point first_seen;
+    std::chrono::steady_clock::time_point last_seen;
     bool active = false;
 };
 
-NodeStats node_stats[4];
+NodeStats node_stats[NODE_COUNT];
 
 void draw_tui(const GameFrame& frame) {
     auto current_time = std::chrono::steady_clock::now();
 
-    // 游標位移至 Terminal 左上角
     std::cout << "\033[H";
-    std::cout << "==================== 樹莓派分散式點陣競速場 ====================\n";
+    std::cout << "==================== 異質極速陣列 TUI Dashboard ====================\n";
 
-    // 初始化二維地圖陣列
     char map_grid[MAP_HEIGHT][MAP_WIDTH];
     for (int r = 0; r < MAP_HEIGHT; ++r) {
         for (int c = 0; c < MAP_WIDTH; ++c) {
@@ -57,9 +55,9 @@ void draw_tui(const GameFrame& frame) {
         }
     }
 
-    // 將車輛位置映射至二維網格
-    char icons[4] = {'P', 'A', 'B', 'Z'};
-    for (int i = 0; i < 4; ++i) {
+    // 車輛圖示：Pi5(P), Pi3B(A), Pi3B+(B), Zero2W(Z), ESP32(E)
+    char icons[NODE_COUNT] = {'P', 'A', 'B', 'Z', 'E'};
+    for (int i = 0; i < NODE_COUNT; ++i) {
         int gx = (int)frame.vehicles[i].pos_x;
         int gy = (int)frame.vehicles[i].pos_y;
 
@@ -76,20 +74,25 @@ void draw_tui(const GameFrame& frame) {
             else if (ch == 'A') std::cout << GREEN << ch << RESET;
             else if (ch == 'B') std::cout << YELLOW << ch << RESET;
             else if (ch == 'Z') std::cout << RED << ch << RESET;
+            else if (ch == 'E') std::cout << MAGENTA << ch << RESET;
             else std::cout << ch;
         }
         std::cout << "\n";
     }
 
-    // 顯示全場數據面板與各節點個別數據
     std::cout << "------------------------------------------------------------\n";
     std::cout << "Frame Seq: " << frame.frame_seq << "\n";
 
-    const char* node_names[4] = {"[0] Pi 5    (P)", "[1] Pi 3B   (A)", "[2] Pi 3B+  (B)", "[3] Zero 2W (Z)"};
-    const char* colors[4]     = {BLUE, GREEN, YELLOW, RED};
+    const char* node_names[NODE_COUNT] = {
+        "[0] Pi 5    (P)", 
+        "[1] Pi 3B   (A)", 
+        "[2] Pi 3B+  (B)", 
+        "[3] Zero 2W (Z)",
+        "[4] ESP32   (E)"
+    };
+    const char* colors[NODE_COUNT] = {BLUE, GREEN, YELLOW, RED, MAGENTA};
 
-    for (int i = 0; i < 4; ++i) {
-        // 計算該節點運行時間 (Node Uptime)
+    for (int i = 0; i < NODE_COUNT; ++i) {
         long node_uptime_sec = 0;
         if (node_stats[i].active) {
             node_uptime_sec = std::chrono::duration_cast<std::chrono::seconds>(current_time - node_stats[i].first_seen).count();
@@ -110,7 +113,6 @@ void draw_tui(const GameFrame& frame) {
                   << "\n";
     }
 
-    // 整體系統統計資訊
     auto total_elapsed_sec = std::chrono::duration_cast<std::chrono::seconds>(current_time - g_server_start_time).count();
     int g_h = total_elapsed_sec / 3600;
     int g_m = (total_elapsed_sec % 3600) / 60;
@@ -135,15 +137,15 @@ int main() {
 
     if (bind(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) return 1;
 
-    // 清空畫面並隱藏游標
     std::cout << "\033[2J\033[?25l";
 
     GameFrame frame{};
     frame.frame_seq = 0;
 
-    for (int i = 0; i < 4; ++i) {
+    // 初始 Y 軸間距分流
+    for (int i = 0; i < NODE_COUNT; ++i) {
         frame.vehicles[i].pos_x = 1.0f;
-        frame.vehicles[i].pos_y = i * 4 + 3;
+        frame.vehicles[i].pos_y = i * 3 + 2; 
     }
 
     socklen_t addr_len = sizeof(client_addr);
@@ -154,17 +156,15 @@ int main() {
     while (true) {
         auto fps_start_time = std::chrono::high_resolution_clock::now();
 
-        // 收取 UDP 封包並更新數據
         while (true) {
             ssize_t bytes = recvfrom(sockfd, &input_pkt, sizeof(input_pkt), MSG_DONTWAIT,
                                      (struct sockaddr*)&client_addr, &addr_len);
             if (bytes <= 0) break;
 
             uint8_t id = input_pkt.vehicle_id;
-            if (id < 4) {
+            if (id < NODE_COUNT) {
                 auto now = std::chrono::steady_clock::now();
 
-                // 首次上線記錄
                 if (!node_stats[id].active) {
                     node_stats[id].active = true;
                     node_stats[id].first_seen = now;
@@ -172,13 +172,11 @@ int main() {
                 node_stats[id].last_seen = now;
                 node_stats[id].total_packets++;
 
-                // 計算移動與圈數 (Lap Count)
                 float move_step = input_pkt.throttle * 0.5f;
-                node_stats[id].current_speed = move_step * 60.0f; // 估算每秒移動距離
+                node_stats[id].current_speed = move_step * 60.0f;
 
                 frame.vehicles[id].pos_x += move_step;
 
-                // 觸發衝線過關 -> 圈數 +1
                 if (frame.vehicles[id].pos_x >= (float)(MAP_WIDTH - 2)) {
                     frame.vehicles[id].pos_x = 1.0f;
                     node_stats[id].laps++;
@@ -189,7 +187,6 @@ int main() {
         frame.frame_seq++;
         draw_tui(frame);
 
-        // 60 FPS 幀率控制
         auto end_time = std::chrono::high_resolution_clock::now();
         std::chrono::duration<float, std::milli> elapsed = end_time - fps_start_time;
         if (elapsed.count() < 16.6f) {
@@ -197,7 +194,7 @@ int main() {
         }
     }
 
-    std::cout << "\033[?25h"; // 恢復游標
+    std::cout << "\033[?25h";
     close(sockfd);
     return 0;
 }
