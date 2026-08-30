@@ -12,6 +12,12 @@
 #include <sstream>
 #include "protocol.h"
 
+#include "balancer_module.hpp"
+#include "cluster_module.hpp"
+
+BalancerModule g_balancer;
+ClusterModule  g_cluster;
+
 #define PORT 8888
 #define MAP_WIDTH 60
 #define MAP_HEIGHT 20
@@ -126,7 +132,37 @@ void draw_tui(const GameFrame& frame) {
               << " | " << CYAN << "Total Frame Loops: " << RESET << frame.frame_seq << "\n";
 }
 
+// ... 前面 include 與結構體保持不變 ...
+
 int main() {
+    // ==========================================
+    //  🎮 Server 啟動選單：動態平衡機制選擇
+    // ==========================================
+    // 1. 啟動選單 (在畫面清空前執行)
+    g_balancer.setup_interactive_menu();
+    bool enable_speed_balancing = false;
+
+    std::cout << "\n========================================" << std::endl;
+    std::cout << " 🖥️  Edge TUI Game Server 啟動中..." << std::endl;
+    std::cout << "========================================" << std::endl;
+    std::cout << "請選擇速度與動態平衡模式：" << std::endl;
+    std::cout << " [1] 純粹真實速度 (關閉平衡，完全展現晶片肌肉硬實力)" << std::endl;
+    std::cout << " [2] 動態平衡模式 (開啟平衡，自動補償弱節點速度)" << std::endl;
+    std::cout << "請輸入選項 (1-2, 預設為 1): ";
+
+    std::string user_input;
+    std::getline(std::cin, user_input);
+    if (!user_input.empty() && user_input == "2") {
+        enable_speed_balancing = true;
+        std::cout << "\n>>> 已啟用：動態平衡模式\n" << std::endl;
+    } else {
+        enable_speed_balancing = false;
+        std::cout << "\n>>> 已啟用：純粹真實速度模式 (無動態補償)\n" << std::endl;
+    }
+
+    // ==========================================
+    //  UDP Socket 初始化與監聽
+    // ==========================================
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
     if (sockfd < 0) return 1;
 
@@ -137,15 +173,15 @@ int main() {
 
     if (bind(sockfd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) return 1;
 
-    std::cout << "\033[2J\033[?25l";
+    
+    std::cout << "\033[2J\033[?25l"; // 清空螢幕並隱藏游標
 
     GameFrame frame{};
     frame.frame_seq = 0;
 
-    // 初始 Y 軸間距分流
     for (int i = 0; i < NODE_COUNT; ++i) {
         frame.vehicles[i].pos_x = 1.0f;
-        frame.vehicles[i].pos_y = i * 3 + 2; 
+        frame.vehicles[i].pos_y = i + 3 + 2;
     }
 
     socklen_t addr_len = sizeof(client_addr);
@@ -155,7 +191,10 @@ int main() {
 
     while (true) {
         auto fps_start_time = std::chrono::high_resolution_clock::now();
-
+        // 1. 非阻塞式收取所有已到達的 UDP 封包
+        socklen_t addr_len = sizeof(client_addr);
+        VehicleInput input_pkt{};
+        
         while (true) {
             ssize_t bytes = recvfrom(sockfd, &input_pkt, sizeof(input_pkt), MSG_DONTWAIT,
                                      (struct sockaddr*)&client_addr, &addr_len);
@@ -172,7 +211,16 @@ int main() {
                 node_stats[id].last_seen = now;
                 node_stats[id].total_packets++;
 
+                // 計算單次移動步階
                 float move_step = input_pkt.throttle * 0.5f;
+
+                // 若開啟動態平衡，針對較慢的節點給予步階加權補償
+                if (enable_speed_balancing) {
+                    if (id == 1) move_step *= 1.8f;      // Pi 3B 補償
+                    else if (id == 2) move_step *= 2.2f; // Pi 3B+ 補償
+                    else if (id == 3) move_step *= 2.0f; // Zero 2W 補償
+                }
+
                 node_stats[id].current_speed = move_step * 60.0f;
 
                 frame.vehicles[id].pos_x += move_step;
